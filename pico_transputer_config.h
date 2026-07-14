@@ -39,6 +39,8 @@
  * Transputer LinkIn      GP16    21
  * Transputer LinkOut     GP17    22
  * Transputer LinkClock   GP18    24    5 MHz
+ * Transputer Reset       GP19    25    active high
+
  * On-board LED           GP25    internal
  */
 
@@ -63,6 +65,8 @@
 #define TP3_LINK_OUT_PIN         17u
 #define TP3_LINK_CLOCK_PIN       18u
 
+#define TP3_RESET_PIN            19u
+
 /* Optional external SPI RAM on SPI1. */
 #define TP3_SPI_RAM_SPI          spi1
 #define TP3_SPI_RAM_RX_PIN       12u
@@ -85,12 +89,13 @@
      TP3_GPIO_BIT(TP3_LINK_IN_PIN) |                                        \
      TP3_GPIO_BIT(TP3_LINK_OUT_PIN) |                                       \
      TP3_GPIO_BIT(TP3_LINK_CLOCK_PIN) |                                     \
+     TP3_GPIO_BIT(TP3_RESET_PIN) |                                          \
      TP3_GPIO_BIT(TP3_SPI_RAM_RX_PIN) |                                     \
      TP3_GPIO_BIT(TP3_SPI_RAM_CSN_PIN) |                                    \
      TP3_GPIO_BIT(TP3_SPI_RAM_SCK_PIN) |                                    \
      TP3_GPIO_BIT(TP3_SPI_RAM_TX_PIN))
 
-_Static_assert(__builtin_popcountll(TP3_USED_GPIO_MASK) == 12,
+_Static_assert(__builtin_popcountll(TP3_USED_GPIO_MASK) == 13,
                "pico2_pin_config.h assigns one GPIO to multiple functions");
 
 

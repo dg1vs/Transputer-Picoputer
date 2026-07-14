@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "pico/stdlib.h"
+
 #include "pico/binary_info.h"
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
@@ -76,6 +76,29 @@ int memnotinit = false;
 int msgdebug = false;
 char *dbgtrigger = NULL;
 int usetvs = false;
+
+uint clock_offset;
+uint linkout_offset;
+uint linkin_offset;
+
+/*
+ * Set by the GPIO interrupt and handled by normal program code.
+ *
+ * The interrupt handler must not attempt to reset the PIO or emulator
+ * directly.
+ */
+volatile int transputer_reset_requested = 0;
+
+static void transputer_reset_gpio_irq(uint gpio, uint32_t events)
+{
+    (void)events;
+
+    if (gpio == TP3_RESET_PIN)
+    {
+        printf("Interrupt\n");
+        transputer_reset_requested = 1;
+    }
+}
 
 
 void init_transputer(void)
@@ -219,6 +242,79 @@ void link_in_booting_ack(int i)
 unsigned char byte_int(uint32_t ptr);
 INLINE void writebyte_int(uint32_t ptr, unsigned char value);
 
+
+static void service_transputer_reset(
+    PIO pio,
+    uint linkout_sm,
+    uint linkout_offset,
+    uint linkin_sm,
+    uint linkin_offset)
+{
+    printf("RESET+\n");
+
+    /*
+     * Stop both serial link engines.
+     */
+    pio_sm_set_enabled(pio, linkout_sm, false);
+    pio_sm_set_enabled(pio, linkin_sm, false);
+
+    /*
+     * Discard incomplete packets and acknowledgements.
+     */
+    pio_sm_clear_fifos(pio, linkout_sm);
+    pio_sm_clear_fifos(pio, linkin_sm);
+
+    /*
+     * Hold LinkOut at the inactive low level while Reset is active.
+     */
+    gpio_init(TP3_LINK_OUT_PIN);
+    gpio_put(TP3_LINK_OUT_PIN, 0);
+    gpio_set_dir(TP3_LINK_OUT_PIN, GPIO_OUT);
+
+    /*
+     * Ignore LinkIn while Reset is active.
+     */
+    gpio_init(TP3_LINK_IN_PIN);
+    gpio_set_dir(TP3_LINK_IN_PIN, GPIO_IN);
+    gpio_pull_down(TP3_LINK_IN_PIN);
+
+    processor_reset_runtime();
+    server_reset_runtime();
+
+    /*
+     * A transputer remains held in reset until Reset is deasserted.
+     */
+    while (gpio_get(TP3_RESET_PIN))
+    {
+        tight_loop_contents();
+    }
+
+    /*
+     * Clear the latched request before enabling the links again.
+     */
+    transputer_reset_requested = 0;
+
+    /*
+     * Restart both state machines at the start of their programs.
+     * The PIO programs themselves remain loaded in instruction memory.
+     */
+    picoputerlinkout_program_init(
+        pio,
+        linkout_sm,
+        linkout_offset,
+        TP3_LINK_OUT_PIN);
+
+    picoputerlinkin_program_init(
+        pio,
+        linkin_sm,
+        linkin_offset,
+        TP3_LINK_IN_PIN);
+
+    printf("RESET-\n");
+}
+
+
+
 int main()
 {
     set_sys_clock_khz(TP3_SYS_CLOCK_KHZ, true);
@@ -274,6 +370,27 @@ int main()
      * single source of truth for the selected PIO instance.
      */
 
+    gpio_init(TP3_RESET_PIN);
+    gpio_set_dir(TP3_RESET_PIN, GPIO_IN);
+    gpio_pull_down(TP3_RESET_PIN);
+
+    gpio_set_irq_enabled_with_callback(
+        TP3_RESET_PIN,
+        GPIO_IRQ_EDGE_RISE,
+        true,
+        transputer_reset_gpio_irq);
+
+    /*
+    * Also handle the case where Reset was already high when the
+    * interrupt was enabled.
+    */
+    if (gpio_get(TP3_RESET_PIN))
+    {
+        printf("Interrupt Reset enabled\n");
+        transputer_reset_requested = 1;
+    }
+     
+
 #if 1
 
     // Initialise the link server
@@ -290,13 +407,13 @@ int main()
     // memory. This SDK function will find a location (offset) in the
     // instruction memory where there is enough space for our program. We need
     // to remember this location!
-    uint offset = pio_add_program(pio, &picoputerclk_program);
+    clock_offset = pio_add_program(pio, &picoputerclk_program);
 
     // Find a free state machine on our chosen PIO (erroring if there are
     // none). Configure it to run our program, and start it, using the
     // helper function we included in our .pio file.
     uint sm = pio_claim_unused_sm(pio, true);
-    picoputerclk_program_init(pio, sm, offset, TP3_LINK_CLOCK_PIN);
+    picoputerclk_program_init(pio, sm, clock_offset, TP3_LINK_CLOCK_PIN);
 
     //--------------------------------------------------------------------------------
     // Set up link out state machine
@@ -306,8 +423,8 @@ int main()
     linkout_sm = sm;
     linkout_pio = pio;
 
-    offset = pio_add_program(pio, &picoputerlinkout_program);
-    picoputerlinkout_program_init(pio, sm, offset, TP3_LINK_OUT_PIN);
+    linkout_offset = pio_add_program(pio, &picoputerlinkout_program);
+    picoputerlinkout_program_init(pio, sm, linkout_offset, TP3_LINK_OUT_PIN);
 
     // Tie state machine to link
     server_linkout_init(0, pio, sm);
@@ -319,8 +436,8 @@ int main()
     sm = pio_claim_unused_sm(pio, true);
     uint linkin_sm = sm;
     PIO linkin_pio = pio;
-    offset = pio_add_program(pio, &picoputerlinkin_program);
-    picoputerlinkin_program_init(pio, sm, offset, TP3_LINK_IN_PIN);
+    linkin_offset = pio_add_program(pio, &picoputerlinkin_program);
+    picoputerlinkin_program_init(pio, sm, linkin_offset, TP3_LINK_IN_PIN);
 
     // Tie state machine to link
     server_linkin_init(0, pio, sm);
@@ -482,4 +599,17 @@ int main()
 
         count++;
     }
+}
+
+
+static void prepare_boot_mode(void)
+{
+    boot_write_index = 0;
+    boot_length_remaining = 0;
+    boot_link = -1;
+    booting = 0;
+    boot_done = 0;
+
+    link_in_data_fp = link_in_boot_start_data;
+    link_in_ack_fp = link_in_boot_start_ack;
 }
