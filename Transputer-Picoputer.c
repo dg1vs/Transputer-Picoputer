@@ -12,7 +12,7 @@
 #include "processor.h"
 #include "arithmetic.h"
 #include "server.h"
-#include "transputer_programs.h"
+#include "transputer_progdata.h"
 #include "pico_transputer_config.h"
 
 #include "oled096.h"
@@ -221,6 +221,11 @@ INLINE void writebyte_int(uint32_t ptr, unsigned char value);
 
 int main()
 {
+    set_sys_clock_khz(TP3_SYS_CLOCK_KHZ, true);
+
+
+
+
     stdio_init_all();
 
     char line[24];
@@ -228,7 +233,7 @@ int main()
     uint linkout_sm;
     PIO linkout_pio;
 
-    set_sys_clock_khz(TP3_SYS_CLOCK_KHZ, true);
+    
 
     /* INMOS links are inactive at logic low. Hold LinkOut low immediately. */
     gpio_init(TP3_LINK_OUT_PIN);
@@ -237,7 +242,7 @@ int main()
 
     bi_decl(bi_program_description("This is a test binary."));
     bi_decl(bi_1pin_with_name(TP3_LED_PIN, "On-board LED"));
-
+    
 
     printf("\nPicoputer\n");
 

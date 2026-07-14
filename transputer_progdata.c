@@ -1,4 +1,4 @@
-#include "transputer_programs.h"
+#include "transputer_progdata.h"
 
 /*
  * Small boot/test programs for the transputer emulator.

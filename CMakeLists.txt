@@ -37,7 +37,7 @@ pico_sdk_init()
 
 add_executable(Transputer-Picoputer 
         Transputer-Picoputer.c 
-        transputer_programs.c
+        transputer_progdata.c
         t4mod/arithmetic.c
         t4mod/fparithmetic.c
         t4mod/p.c
