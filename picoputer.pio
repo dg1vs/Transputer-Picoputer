@@ -1,16 +1,15 @@
 ; Recent link-interface integration notes
 ; ---------------------------------------
-; The electrical link is non-inverted and idle low.  LinkIn and LinkOut run at
+; The electrical link is non-inverted and idle low. LinkIn and LinkOut run at
 ; eight PIO cycles per bit; with a 160-MHz state-machine clock this gives the
-; required 20-Mbit/s link rate (50 ns per bit).  The C011 ClockIn generator is a
+; required 20-Mbit/s link rate (50 ns per bit). The Clock generator is a
 ; separate 5-MHz state machine and is not stopped during simulated reset.
 ;
 ; Picoputer PIO programs
-
-;--------------------------------------------------------------------------------
-; C011 Clock
-;--------------------------------------------------------------------------------
 ;
+;--------------------------------------------------------------------------------
+; 5 Mhz Clock
+;--------------------------------------------------------------------------------
 
 ; the pin should be mapped to the GPIO that drives the 5 MHz clock pin.
 
@@ -38,7 +37,6 @@ void picoputerclk_program_init(PIO pio, uint sm, uint offset, uint pin) {
     sm_config_set_clkdiv(&c, div);
 
     pio_sm_init(pio, sm, offset, &c);
-
     pio_sm_set_enabled(pio, sm, true);
 }
 %}
@@ -54,7 +52,6 @@ void picoputerclk_program_init(PIO pio, uint sm, uint offset, uint pin) {
 ;
 ; Clock is nominally 30MHz, 10Mhz for slower links
 ;
-
 ; LinkOut packet ownership:
 ;   - PIO generates the first high start/ACK bit.
 ;   - TX FIFO supplies ten LSB-first positions.
@@ -86,9 +83,9 @@ bitloop:
     jmp stopidle side 0 [7] ; Return explicitly to the low idle state
 
 % c-sdk {
-#include "hardware/clocks.h"
-#include "hardware/gpio.h"
-#include "pico_transputer_config.h"
+//#include "hardware/clocks.h"
+//#include "hardware/gpio.h"
+//#include "pico_transputer_config.h"
 
 /*
  * Reset reuses this helper to restart the state machine at the program entry.
@@ -128,7 +125,6 @@ static inline void picoputerlinkout_program_init(PIO pio, uint sm, uint offset, 
     float div = (float)clock_get_hz(clk_sys) / (float)TP3_LINK_PIO_CLOCK_HZ;
     hard_assert(div >= 1.0f);
     sm_config_set_clkdiv(&c, div);
-
 
     pio_sm_init(pio, sm, offset, &c);
 
@@ -186,6 +182,10 @@ good_stop:             ; Framing validation will be added after basic RX works.
 
 
 % c-sdk {
+//#include "hardware/clocks.h"
+//#include "hardware/gpio.h"
+//#include "pico_transputer_config.h"
+
 /*
  * Reset reuses this helper after notReset is released.  The pull-down matches
  * the physical low idle state and avoids a false rising-edge start detection

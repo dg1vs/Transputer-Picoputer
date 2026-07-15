@@ -2,13 +2,12 @@
 #define PICO_TRANSPUTER_CONFIG_H
 
 #include <stdint.h>
-#include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "hardware/pio.h"
 #include "hardware/spi.h"
 
+// Ascii-Art for huge text by
 // https://patorjk.com/software/taag/#p=display&f=Big&t=Memory&x=none&v=4&h=4&w=80&we=false
-
 
 
 /*
@@ -46,8 +45,8 @@
 
 
 /* stdio UART is enabled in CMakeLists.txt and uses the Pico 2 defaults. */
-#define TP3_CONSOLE_UART_TX_PIN  PICO_DEFAULT_UART_TX_PIN
-#define TP3_CONSOLE_UART_RX_PIN  PICO_DEFAULT_UART_RX_PIN
+#define TP3_CONSOLE_UART_TX_PIN  PICO_DEFAULT_UART_TX_PIN // GP0
+#define TP3_CONSOLE_UART_RX_PIN  PICO_DEFAULT_UART_RX_PIN // GP1
 
 /* On-board status LED. */
 #define TP3_LED_PIN              PICO_DEFAULT_LED_PIN
@@ -69,7 +68,8 @@
  * The name is retained for compatibility, but the connected interface signal
  * is notReset: GP19 low asserts reset and GP19 high releases it.
  */
-#define TP3_RESET_PIN            19u
+// TODO Change to Notreset???
+ #define TP3_RESET_PIN            19u
 
 /* Optional external SPI RAM on SPI1. */
 #define TP3_SPI_RAM_SPI          spi1
@@ -102,8 +102,6 @@
 _Static_assert(__builtin_popcountll(TP3_USED_GPIO_MASK) == 13,
                "pico2_pin_config.h assigns one GPIO to multiple functions");
 
-
-
 /*
 *  _      _       _           _____                     _         _____             __ _       
 * | |    (_)     | |         / ____|                   | |       / ____|           / _(_)      
@@ -118,9 +116,7 @@ _Static_assert(__builtin_popcountll(TP3_USED_GPIO_MASK) == 13,
 *
 * 160 MHz is required by the existing eight-PIO-cycles-per-bit
 * implementation for a 20 Mbit/s link.
-*
-* Pico 2 is officially specified for 150 MHz, so this is technically
-* an overclock.
+* Pico 2 is officially specified for 150 MHz, so this is technically an overclock.
 */
 
 /*
@@ -144,8 +140,7 @@ _Static_assert(__builtin_popcountll(TP3_USED_GPIO_MASK) == 13,
     (TP3_LINK_BIT_RATE_HZ * TP3_LINK_CYCLES_PER_BIT)
 
 /*
- * The IMS C011 ClockIn remains 5 MHz for both the 10 Mbit/s and
- * 20 Mbit/s link modes.
+ * The ClockOut of the picoputer is 5 MHz for both the 10 Mbit/s and 20 Mbit/s link modes.
  */
 #define TP3_C011_CLOCK_HZ           5000000u
 
@@ -153,7 +148,6 @@ _Static_assert(
     TP3_LINK_PIO_CLOCK_HZ <= TP3_SYS_CLOCK_KHZ * 1000u,
     "System clock is too low for configured link rate"
 );
-
 
 /*
 *  __  __                                 
@@ -190,11 +184,11 @@ _Static_assert(
 #define TRANS_SPI_RAM_SIZE    ((uint32_t)(2u * 1024u * 1024u))
 
 #if TRANS_USE_SPI_RAM
-#define TRANS_EXT_MEM_SIZE    TRANS_SPI_RAM_SIZE
-#define TRANS_MEM_BACKEND_NAME "external SPI RAM"
+    #define TRANS_EXT_MEM_SIZE    TRANS_SPI_RAM_SIZE
+    #define TRANS_MEM_BACKEND_NAME "external SPI RAM"
 #else
-#define TRANS_EXT_MEM_SIZE    TRANS_PICO_RAM_SIZE
-#define TRANS_MEM_BACKEND_NAME "Pico internal RAM"
+    #define TRANS_EXT_MEM_SIZE    TRANS_PICO_RAM_SIZE
+    #define TRANS_MEM_BACKEND_NAME "Pico internal RAM"
 #endif
 
 #define TRANS_MEM_WORD_MASK   ((uint32_t)((TRANS_EXT_MEM_SIZE - 1u) & 0xFFFFFFFCu))
