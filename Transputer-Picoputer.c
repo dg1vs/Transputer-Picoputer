@@ -51,6 +51,8 @@ extern void server_simkey(void);
 void link_in_booting_ack(int i);
 void link_in_booting_data(int i, int data);
 
+static void prepare_boot_mode(void);
+
 #if 0
 /* Write a byte to memory. */
 inline void writebyte (unsigned long ptr, unsigned char value)
@@ -87,6 +89,13 @@ uint linkin_offset;
  * The interrupt handler must not attempt to reset the PIO or emulator
  * directly.
  */
+/*
+ * External reset integration
+ * --------------------------
+ * The board-level signal is notReset: low asserts reset, high releases it.
+ * The GPIO interrupt only latches this flag.  All processor, server and PIO
+ * state changes are deliberately performed later in normal execution context.
+ */
 volatile int transputer_reset_requested = 0;
 
 static void transputer_reset_gpio_irq(uint gpio, uint32_t events)
@@ -95,7 +104,6 @@ static void transputer_reset_gpio_irq(uint gpio, uint32_t events)
 
     if (gpio == TP3_RESET_PIN)
     {
-        printf("Interrupt\n");
         transputer_reset_requested = 1;
     }
 }
@@ -172,6 +180,14 @@ void link_in_boot_load(int i, int data)
 
 // First data byte received, this is the length
 
+/*
+ * Link bootstrap protocol
+ * -----------------------
+ * The first data byte is the number of bootstrap bytes to load.  The receive
+ * handlers are switched to the memory loader before the length-byte ACK is
+ * sent, because the host may start the next 20-Mbit/s packet immediately after
+ * observing that ACK.
+ */
 void link_in_boot_start_data(int i, int data)
 {
 
@@ -183,19 +199,20 @@ void link_in_boot_start_data(int i, int data)
     if (data >= 2)
     {
         boot_length_remaining = data;
+       
+
+        // Switch to the memory loader handler from now on
+        booting = 1;
+
+        //printf("Booting, moving to download handlers...\n");
+        link_in_data_fp = link_in_booting_data;
+        link_in_ack_fp = link_in_booting_ack;
 
         // ACK the byte
         send_ack_to_link(i);
 
         /* One compact diagnostic line per bootstrap. */
         printf("B:%02X\n", data);
-
-        // Switch to the memory loader handler from now on
-        booting = 1;
-
-        printf("Booting, moving to download handlers...\n");
-        link_in_data_fp = link_in_booting_data;
-        link_in_ack_fp = link_in_booting_ack;
     }
     else
     {
@@ -243,6 +260,15 @@ unsigned char byte_int(uint32_t ptr);
 INLINE void writebyte_int(uint32_t ptr, unsigned char value);
 
 
+/*
+ * Reset service for the simulated transputer
+ * ------------------------------------------
+ * Reset stops and flushes the two link state machines, holds LinkOut at its
+ * inactive low level, clears processor/link runtime state, and waits until the
+ * active-low notReset input is released.  The PIO programs remain resident;
+ * their saved offsets are used to restart the state machines.  The separate
+ * 5-MHz C011 clock state machine continues to run, and emulated RAM is retained.
+ */
 static void service_transputer_reset(
     PIO pio,
     uint linkout_sm,
@@ -282,9 +308,10 @@ static void service_transputer_reset(
     server_reset_runtime();
 
     /*
-     * A transputer remains held in reset until Reset is deasserted.
-     */
-    while (gpio_get(TP3_RESET_PIN))
+    * Reset input is active low at the Pico interface.
+    * Remain in reset until the signal returns high.
+    */
+     while (!gpio_get(TP3_RESET_PIN))
     {
         tight_loop_contents();
     }
@@ -315,6 +342,11 @@ static void service_transputer_reset(
 
 
 
+/*
+ * The system clock must be selected before stdio_init_all().  UART baud-rate
+ * divisors are calculated during stdio initialization; changing clk_sys
+ * afterwards produces unreadable serial output.
+ */
 int main()
 {
     set_sys_clock_khz(TP3_SYS_CLOCK_KHZ, true);
@@ -370,23 +402,32 @@ int main()
      * single source of truth for the selected PIO instance.
      */
 
+    /*
+     * The external interface exposes notReset, not an active-high Reset.
+     * Use a pull-up for the released state and latch the falling edge as reset
+     * assertion.  The level check also covers reset already being active when
+     * the interrupt is enabled.
+     */
     gpio_init(TP3_RESET_PIN);
     gpio_set_dir(TP3_RESET_PIN, GPIO_IN);
-    gpio_pull_down(TP3_RESET_PIN);
+    gpio_pull_up(TP3_RESET_PIN);
 
     gpio_set_irq_enabled_with_callback(
         TP3_RESET_PIN,
-        GPIO_IRQ_EDGE_RISE,
+        GPIO_IRQ_EDGE_FALL,
         true,
         transputer_reset_gpio_irq);
 
     /*
-    * Also handle the case where Reset was already high when the
+    * Also handle the case where Reset was already low when the
     * interrupt was enabled.
     */
-    if (gpio_get(TP3_RESET_PIN))
+    printf("Reset input initial level: %u\n",
+       (unsigned)gpio_get(TP3_RESET_PIN));
+
+    if (!gpio_get(TP3_RESET_PIN))
     {
-        printf("Interrupt Reset enabled\n");
+        printf("Reset active at startup\n");
         transputer_reset_requested = 1;
     }
      
@@ -407,6 +448,11 @@ int main()
     // memory. This SDK function will find a location (offset) in the
     // instruction memory where there is enough space for our program. We need
     // to remember this location!
+    /*
+     * Keep each program offset for the lifetime of the firmware.  Reset only
+     * reinitializes LinkIn and LinkOut state machines; it does not reload PIO
+     * instruction memory or disturb the continuously running C011 clock.
+     */
     clock_offset = pio_add_program(pio, &picoputerclk_program);
 
     // Find a free state machine on our chosen PIO (erroring if there are
@@ -475,72 +521,137 @@ int main()
     // Wait for a byte from the link
     // Set up data and ack handlers
 
-    link_in_data_fp = link_in_boot_start_data;
-    link_in_ack_fp = link_in_boot_start_ack;
+//    link_in_data_fp = link_in_boot_start_data;
+//    link_in_ack_fp = link_in_boot_start_ack;
+//
+//    printf("Entering boot loop...\n");
+//
+//    while (!boot_done)
+//    {
+//        // Process links
+//        bootloop();
+//    }
+//
+//    printf("Entering main loop...\n");
 
-    printf("Entering boot loop...\n");
+/*
+ * Top-level simulated-transputer lifecycle:
+ *
+ *   BOOT -> RUN -> external notReset -> reset service -> BOOT
+ *
+ * This loop permits repeated iserver bootstrap sessions without rebooting the
+ * RP2350.  Both the bootstrap loop and processor core observe the latched reset
+ * request so reset can interrupt either state.
+ */
+while (1)
+{
+    prepare_boot_mode();
 
-    while (!boot_done)
+    printf("BOOT\n");
+
+    /*
+     * Wait for a bootstrap, but remain responsive to external Reset.
+     */
+    while (!boot_done && !transputer_reset_requested)
     {
-        // Process links
         bootloop();
     }
 
-    printf("Entering main loop...\n");
-
-    while (1)
+    if (transputer_reset_requested)
     {
-        char line[80];
+        service_transputer_reset(
+            pio,
+            linkout_sm,
+            linkout_offset,
+            linkin_sm,
+            linkin_offset);
 
-        //----------------------------------------
-        // Run the transputer
-#if !LOOPBACK
+        continue;
+    }
+
+    printf("RUN:%02X\n", boot_write_index);
+
+    /*
+     * mainloop() normally remains here while the program runs.
+     * It returns when the Reset flag is detected, or for an existing
+     * emulator exit condition.
+     */
+    while (!transputer_reset_requested)
+    {
         mainloop();
 
-        // And the links, the server is now on whatever is on the other
-        // end of the links
-
-        linkloop();
-#endif
-        //----------------------------------------
-#if LOOPBACK
-        qval++;
-
-        if (data = picoputerlinkin_get(linkin_pio, linkin_sm))
+        if (!transputer_reset_requested)
         {
-            // We have data. The external LinkIn signal is not inverted.
-            data >>= 22;
-
-            sprintf(line, "\ndata= %08X", data);
-            printf(line);
-
-            if (data == 0)
-            {
-                // This is an ACK
-                printf("\nACK");
-            }
-            else
-            {
-                // Data packet
-                // Remove second stop bit in LSB
-                data >>= 1;
-
-                // Mask out data, just in case
-                data &= 0xff;
-
-                printf("\nDATA:%02X", data);
-            }
-
-            // ACK: PIO generates H; a zero payload produces the following L.
-            picoputerlinkout_program_putc(linkout_pio, linkout_sm, 0x000);
-            sleep_ms(10);
-            // Data: second start bit in bit 0, D0..D7 in bits 1..8, stop=0.
-            picoputerlinkout_program_putc(linkout_pio,
-                                           linkout_sm,
-                                           0x001 | ((data & 0xff) << 1));
+            /*
+             * Preserve the existing behavior if mainloop() returns for
+             * a reason other than external Reset.
+             */
+            linkloop();
         }
-#endif
     }
+
+    service_transputer_reset(
+        pio,
+        linkout_sm,
+        linkout_offset,
+        linkin_sm,
+        linkin_offset);
+}
+
+
+//    while (1)
+//    {
+//        char line[80];
+//
+//        //----------------------------------------
+//        // Run the transputer
+//#if !LOOPBACK
+//        mainloop();
+//
+//        // And the links, the server is now on whatever is on the other
+//        // end of the links
+//
+//        linkloop();
+//#endif
+//        //----------------------------------------
+//#if LOOPBACK
+//        qval++;
+//
+//        if (data = picoputerlinkin_get(linkin_pio, linkin_sm))
+//        {
+//            // We have data. The external LinkIn signal is not inverted.
+//            data >>= 22;
+//
+//            sprintf(line, "\ndata= %08X", data);
+//            printf(line);
+//
+//            if (data == 0)
+//            {
+//                // This is an ACK
+//                printf("\nACK");
+//            }
+//            else
+//            {
+//                // Data packet
+//                // Remove second stop bit in LSB
+//                data >>= 1;
+//
+//                // Mask out data, just in case
+//                data &= 0xff;
+//
+//                printf("\nDATA:%02X", data);
+//            }
+//
+//            // ACK: PIO generates H; a zero payload produces the following L.
+//            picoputerlinkout_program_putc(linkout_pio, linkout_sm, 0x000);
+//            sleep_ms(10);
+//            // Data: second start bit in bit 0, D0..D7 in bits 1..8, stop=0.
+//            picoputerlinkout_program_putc(linkout_pio,
+//                                           linkout_sm,
+//                                           0x001 | ((data & 0xff) << 1));
+//        }
+//#endif
+//    }
 
     // And done for now
     exit(0);
@@ -602,6 +713,11 @@ int main()
 }
 
 
+/*
+ * Restore only bootstrap bookkeeping and callbacks.  Processor registers,
+ * server transfer state and PIO FIFOs are reset by their dedicated reset
+ * helpers before this state is entered after an external reset.
+ */
 static void prepare_boot_mode(void)
 {
     boot_write_index = 0;

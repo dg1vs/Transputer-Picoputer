@@ -1,3 +1,10 @@
+; Recent link-interface integration notes
+; ---------------------------------------
+; The electrical link is non-inverted and idle low.  LinkIn and LinkOut run at
+; eight PIO cycles per bit; with a 160-MHz state-machine clock this gives the
+; required 20-Mbit/s link rate (50 ns per bit).  The C011 ClockIn generator is a
+; separate 5-MHz state machine and is not stopped during simulated reset.
+;
 ; Picoputer PIO programs
 
 ;--------------------------------------------------------------------------------
@@ -48,6 +55,11 @@ void picoputerclk_program_init(PIO pio, uint sm, uint offset, uint pin) {
 ; Clock is nominally 30MHz, 10Mhz for slower links
 ;
 
+; LinkOut packet ownership:
+;   - PIO generates the first high start/ACK bit.
+;   - TX FIFO supplies ten LSB-first positions.
+;   - A zero FIFO word therefore produces a valid H-L ACK and low idle tail.
+;
 .program picoputerlinkout
 
 .side_set 1 opt
@@ -78,6 +90,11 @@ bitloop:
 #include "hardware/gpio.h"
 #include "pico_transputer_config.h"
 
+/*
+ * Reset reuses this helper to restart the state machine at the program entry.
+ * Establishing the output latch as low before enabling PIO prevents a spurious
+ * start/ACK pulse during startup or reset release.
+ */
 static inline void picoputerlinkout_program_init(PIO pio, uint sm, uint offset, uint pin_linkout) {
     /*
      * Establish the INMOS idle level before the GPIO is handed to the PIO.
@@ -142,6 +159,12 @@ void picoputerlinkout_program_putc(PIO pio, uint sm, int c)
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+; LinkIn synchronization:
+;   - first wait confirms the low idle state;
+;   - second wait detects the first rising start edge;
+;   - the delay centers the first sample in the second start bit;
+;   - ten samples capture start2, D0..D7 and the low stop bit.
+;
 .program picoputerlinkin
 
 ; IN pin 0 and JMP pin are both mapped to the GPIO used as linkin.
@@ -163,6 +186,11 @@ good_stop:             ; Framing validation will be added after basic RX works.
 
 
 % c-sdk {
+/*
+ * Reset reuses this helper after notReset is released.  The pull-down matches
+ * the physical low idle state and avoids a false rising-edge start detection
+ * while the external driver is disconnected or tri-stated.
+ */
 static inline void picoputerlinkin_program_init(PIO pio, uint sm, uint offset, uint pin) {
     pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);
     pio_gpio_init(pio, pin);

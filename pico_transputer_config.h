@@ -65,6 +65,10 @@
 #define TP3_LINK_OUT_PIN         17u
 #define TP3_LINK_CLOCK_PIN       18u
 
+/*
+ * The name is retained for compatibility, but the connected interface signal
+ * is notReset: GP19 low asserts reset and GP19 high releases it.
+ */
 #define TP3_RESET_PIN            19u
 
 /* Optional external SPI RAM on SPI1. */
@@ -119,6 +123,10 @@ _Static_assert(__builtin_popcountll(TP3_USED_GPIO_MASK) == 13,
 * an overclock.
 */
 
+/*
+ * Link timing depends on selecting clk_sys before UART/PIO initialization.
+ * The 160-MHz clock gives exactly eight state-machine cycles per 20-Mbit/s bit.
+ */
 #define TP3_SYS_CLOCK_KHZ           160000u
 
 /*

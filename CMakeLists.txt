@@ -37,21 +37,27 @@ pico_sdk_init()
 
 add_executable(Transputer-Picoputer 
         Transputer-Picoputer.c 
-        transputer_progdata.c
-        t4mod/arithmetic.c
-        t4mod/fparithmetic.c
-        t4mod/p.c
-        t4mod/server.c
+        t4mod/transputer_progdata.c
+        
+        t4/arithmetic.c
         t4/s_ldexp.c
         t4/s_ldexpf.c
         t4/s_scalbn.c
         t4/s_scalbnf.c
-        t4mod/w_remainder.c
-        t4mod/w_sqrt.c 
+        t4/w_remainder.c
+        t4/w_sqrt.c 
+        
+        t4mod/fparithmetic.c
+        t4mod/p.c
+        t4mod/server.c
         
         t4mod/spi_ram.c
         helper/oled096.c 
         )
+
+target_compile_definitions(Transputer-Picoputer  PRIVATE
+    TRANSPUTER_PICOPUTER_PROJECT=1
+)
 
 pico_set_program_name(Transputer-Picoputer "Transputer-Picoputer")
 pico_set_program_version(Transputer-Picoputer "0.1")
@@ -77,6 +83,7 @@ target_link_libraries(Transputer-Picoputer
 target_include_directories(Transputer-Picoputer PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/t4mod
+        ${CMAKE_CURRENT_LIST_DIR}/t4
         ${CMAKE_CURRENT_LIST_DIR}/helper
         )
 
