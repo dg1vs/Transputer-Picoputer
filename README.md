@@ -30,31 +30,3 @@ The project is also intended as a learning platform for:
 A similar project is the [DevZendo Transputer Emulator](https://github.com/devzendo/transputer-emulator/tree/master), which also uses a Raspberry Pi Pico to emulate a Transputer.
 
 For this project, however, I decided to continue using Julian Highfield's emulator. One important reason is its close relationship with the Transputer validation suite created by Mike Brüstle and available through [transputer.net](https://www.transputer.net/).
-
-
-
-
-# Transputer-Picoputer
-
-This is a port of blackjetrock's picoputer 
-(via [https://github.com/blackjetrock/picoputer](https://github.com/blackjetrock/picoputer)) 
-which is port of Julian Highfield's transputer emulator 
-(via [https://github.com/pahihu/t4](https://github.com/pahihu/t4)). 
-The t4 transputer emulator from Julian is a nice piece of software, which can be used to compile transputer software using the old INMOS-toolset. 
-The emulator runs now on a Raspberry Pi Pico2 and talks down one link that are attached to PIO hardware. 
-The PIOs run code that uses the 20MHz transputer link protocol. 
-The link-interface I'm using is one off then Teensy-Link-Interfaces (TLI) 
-(see [https://github.com/dg1vs/Transputer-Teensy-Link](https://github.com/dg1vs/Transputer-Teensy-Link))
-
-## Goal
-One of my main goals of this coding experince is to understand the Transputer in mor detail and on the long run build I/O-devices using the PIO as an Transputer-inteface
-
-## Other similar projects
-
-I found a similar project
-(see [https://github.com/devzendo/transputer-emulator/tree/master](https://github.com/devzendo/transputer-emulator/tree/master)),
-using an Raspberry Pi Pico for simulating an Transputer. Nevertheless I'm sticked to Julian emulator since he runs the Transputer Validation suite from Mike 
-[transputer.net](transputer.net)
-
-
-
