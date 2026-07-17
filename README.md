@@ -30,3 +30,7 @@ The project is also intended as a learning platform for:
 A similar project is the [DevZendo Transputer Emulator](https://github.com/devzendo/transputer-emulator/tree/master), which also uses a Raspberry Pi Pico to emulate a Transputer.
 
 For this project, however, I decided to continue using Julian Highfield's emulator. One important reason is its close relationship with the Transputer validation suite created by Mike Brüstle and available through [transputer.net](https://www.transputer.net/).
+
+## Next steps
+
+
