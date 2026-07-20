@@ -2,30 +2,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "pico/binary_info.h"
-
 #include "arithmetic.h"
 #include "pico_transputer_config.h"
 #include "processor.h"
 #include "server.h"
-
 #include "oled096.h"
-
 #include "picoputer.pio.h"
 
 #if TRANS_USE_SPI_RAM
-#include "spi_ram.h"
+  #include "spi_ram.h"
 #endif
 
-#define DEBUG_STOP            \
-  do {                        \
-    volatile int x = 1;       \
-    while (x) {               \
-    }                         \
+#define DEBUG_STOP                                                             \
+  do {                                                                         \
+    volatile int x = 1;                                                        \
+    while (x) {                                                                \
+    }                                                                          \
   } while (0)
 
 #define MEM_BYTE_MASK 0x0000ffff
@@ -38,24 +34,6 @@ static I2C_SLAVE_DESC oled0 = {
     .baudrate = TP3_OLED_BAUDRATE,
 };
 
-extern unsigned long WPtr;
-extern unsigned long ProcPriority;
-
-extern void server_simkey(void);
-
-void link_in_booting_ack(int i);
-void link_in_booting_data(int i, int data);
-
-static void prepare_boot_mode(void);
-
-#if 0
-/* Write a byte to memory. */
-inline void writebyte (unsigned long ptr, unsigned char value)
-{
-	/* Write byte, ensuring memory reference is in range. */
-	mem[(ptr & MEM_BYTE_MASK)]   = value;
-}
-#endif
 
 int analyse = false;
 int copy = false;
@@ -77,6 +55,23 @@ int usetvs = false;
 uint clock_offset;
 uint linkout_offset;
 uint linkin_offset;
+
+
+extern unsigned long WPtr;
+extern unsigned long ProcPriority;
+extern void server_simkey(void);
+void link_in_booting_ack(int i);
+void link_in_booting_data(int i, int data);
+static void prepare_boot_mode(void);
+
+#if 0
+/* Write a byte to memory. */
+inline void writebyte (unsigned long ptr, unsigned char value)
+{
+	/* Write byte, ensuring memory reference is in range. */
+	mem[(ptr & MEM_BYTE_MASK)]   = value;
+}
+#endif
 
 /*
  * External reset integration
@@ -297,6 +292,7 @@ static void service_transputer_reset(PIO pio, uint linkout_sm,
  * afterwards produces unreadable serial output.
  */
 int main() {
+
   set_sys_clock_khz(TP3_SYS_CLOCK_KHZ, true);
 
   stdio_init_all();
