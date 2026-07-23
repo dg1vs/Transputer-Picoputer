@@ -1327,12 +1327,17 @@ void mainloop(void) {
             }
           }
         } else {
-          /* Link communication. */
-          writeword(BReg, Wdesc);
-          writeword(WPtr, AReg);
-          Link[0].Out.Address = WPtr;
-          Link[0].Out.Length = 1;
+          /*
+           * External LinkOut communication.
+           *
+           * The active Pico runtime link service uses LinkOut[].  The old
+           * Link[0].Out bookkeeping is not consumed by linkloop(), which left
+           * OUTBYTE processes permanently descheduled.  Store the byte in the
+           * workspace and submit it through the same ACK-gated path as OUT.
+           */
           deschedule();
+          send_value_linkout_message(
+              1, AReg, BReg, CReg, WPtr, IPtr, ProcPriority);
         }
         break;
       case 0x0f: /* outword     */
@@ -1405,16 +1410,20 @@ void mainloop(void) {
             }
           }
         } else {
-          /* Link communication. */
+          /* External LinkOut communication. */
           if (msgdebug || emudebug)
-            printf("-I-EMUDBG: out(2): Link communication. Old channel "
+            printf("-I-EMUDBG: outword(2): Link communication. Old channel "
                    "word=#%08X.\n",
                    word(BReg));
-          writeword(BReg, Wdesc);
-          writeword(WPtr, AReg);
-          Link[0].Out.Address = WPtr;
-          Link[0].Out.Length = 4;
+
+          /*
+           * Submit the four little-endian bytes through LinkOut[] so linkloop()
+           * can send them one at a time and reschedule this process after the
+           * final ACK.
+           */
           deschedule();
+          send_value_linkout_message(
+              BytesPerWord, AReg, BReg, CReg, WPtr, IPtr, ProcPriority);
         }
         break;
       case 0x10: /* seterr      */
