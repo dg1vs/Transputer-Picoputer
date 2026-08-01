@@ -297,6 +297,7 @@ typedef struct _LINKOUT_DATA
   uint     sm;               // Which state machine in the PIO handles the link
   int      ack_wait;         // We have sent a byte, nd are waiting for an ACK
   int      done_on_ack;      // After next ACK we are done
+  bool      configured;
 } LINKOUT_DATA;
 
 LINKOUT_DATA LinkOut[NUMBER_OF_LINKS];
@@ -312,41 +313,45 @@ typedef struct _LINKIN_DATA
   uint     sm;                  // Which state machine in the PIO handles the link
   bool     have_stored;         // Have we got a stored byte?
   int      stored_byte;         // Stored byte
+  bool      configured;
 
 } LINKIN_DATA;
 
 LINKIN_DATA LinkIn[NUMBER_OF_LINKS];
 
-// ks both function are max. shorten, please check the original files 
-int which_linkout(uint32_t a)
+static int which_linkout(uint32_t address)
 {
-  switch(a)
-    {
+    switch (address) {
     case Link0Out:
-    	return 0;
-
-      // What do we do? Use Link 0 for now
+        return 0;
+    case Link1Out:
+        return 1;
+    case Link2Out:
+        return 2;
+    case Link3Out:
+        return 3;
     default:
-      return 0;
+        return -1;
     }
-  
 }
 
-int which_linkin(uint32_t a)
+static int which_linkin(uint32_t address)
 {
-   switch(a)
-    {
+    switch (address) {
     case Link0In:
-      return 0;
-      
-      // What do we do? Use Link 0 for now
+        return 0;
+    case Link1In:
+        return 1;
+    case Link2In:
+        return 2;
+    case Link3In:
+        return 3;
     default:
-      return 0;
+        return -1;
     }
-    
 }
 
-/*KS uint32_t linkin_address[NUMBER_OF_LINKS] =
+static const uint32_t linkin_address[NUMBER_OF_LINKS] =
   {
    Link0In,   
    Link1In,   
@@ -354,23 +359,14 @@ int which_linkin(uint32_t a)
    Link3In,   
   };
 
-uint32_t linkout_address[NUMBER_OF_LINKS] =
+static const uint32_t linkout_address[NUMBER_OF_LINKS] =
   {
    Link0Out,   
    Link1Out,   
    Link2Out,   
    Link3Out,   
   };
-*/ 
-  uint32_t linkin_address[NUMBER_OF_LINKS] =
-  {
-   Link0In,
-  };
-
-uint32_t linkout_address[NUMBER_OF_LINKS] =
-  {
-   Link0Out,
-  };
+ 
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -398,6 +394,7 @@ void server_init(void)
       LinkOut[i].done_on_ack = 0;
       LinkOut[i].length = 0;
       LinkOut[i].channel_address = linkout_address[i];
+	  LinkOut[i].configured = false;
     }
 
   for(int i=0; i<NUMBER_OF_LINKS; i++)
@@ -407,7 +404,8 @@ void server_init(void)
       LinkIn[i].length = 0;
       LinkIn[i].channel_address = linkin_address[i];
       LinkIn[i].have_stored = false;
-    }
+	  LinkIn[i].configured = false;	
+	}
 }
 
 /*
@@ -447,6 +445,7 @@ void server_linkout_init(int linkno, PIO pio, uint sm)
 
   LinkOut[linkno].pio = pio;
   LinkOut[linkno].sm  = sm;
+  LinkOut[linkno].configured = true;
 }
 
 void server_linkin_init(int linkno, PIO pio, uint sm)
@@ -456,6 +455,7 @@ void server_linkin_init(int linkno, PIO pio, uint sm)
 
   LinkIn[linkno].pio = pio;
   LinkIn[linkno].sm  = sm;
+  LinkIn[linkno].configured = true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -612,16 +612,17 @@ LINK_IN_ACK_FP link_in_ack_fp = link_in_ack_null;
 void bootloop(void)
 {
   // We do not send data unless it is a reply to a packet
-  
   // If we receive anything then that link becomes the link for bootstrap
-  
-  for(int i=0; i<NUMBER_OF_LINKS; i++)
-    {
-      int data;
-      char line[40];
+  for(int i=0; i<NUMBER_OF_LINKS; i++) {
+    int data;
+    char line[40];
+
+    if (!LinkIn[i].configured || !LinkOut[i].configured) {
+        continue;
+    }
 
       // ...and there is data...
-      if( (data = get_data_from_link(i)) != LINK_BYTE_NONE )
+    if( (data = get_data_from_link(i)) != LINK_BYTE_NONE )
 	{
 	  
 	  if( data == LINK_BYTE_ACK )
@@ -820,11 +821,14 @@ void linkloop(void)
   // Handle all output links
   for(int i=0; i<NUMBER_OF_LINKS; i++)
     {
-      int data;
-      
-      // If link is sending data, ... */
-      
-      if( LinkOut[i].length > 0 )
+    int data;
+    
+	if (!LinkOut[i].configured) {
+        continue;
+    }  
+    
+	// If link is sending data, ... */
+    if( LinkOut[i].length > 0 )
 	{
 	  /* ...and we have received an ACK for anything we have sent... */
 	  if( !LinkOut[i].ack_wait ) 
@@ -866,13 +870,16 @@ void linkloop(void)
     }
 
   /* See if anything has been received */
-  for(int i=0; i<NUMBER_OF_LINKS; i++)
-    {
-      int data;
-      char line[40];
+  for(int i=0; i<NUMBER_OF_LINKS; i++) {
+    int data;
+    char line[40];
+	if (!LinkIn[i].configured || !LinkOut[i].configured) {
+        continue;
+    }
 
-      // Are we waiting for data?
-      if( LinkIn[i].length > 0 )
+	
+    // Are we waiting for data?
+    if( LinkIn[i].length > 0 )
 	{
 	  // Yes, do we have a stored byte?
 	  if( LinkIn[i].have_stored )

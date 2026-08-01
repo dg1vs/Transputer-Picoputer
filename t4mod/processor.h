@@ -31,7 +31,7 @@
 
 #include <stdint.h>
 #include "fparithmetic.h"
-
+#include <stdbool.h>
 /*
  * processor.h
  *
@@ -139,6 +139,6 @@ extern LinkIface Link[4];
  * emulated RAM allocated and intact.
  */
 // Todo add DEFINE
-extern volatile int transputer_reset_requested;
+extern volatile bool transputer_reset_requested;
 
 void processor_reset_runtime(void);

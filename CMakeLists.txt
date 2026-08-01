@@ -46,8 +46,8 @@ add_executable(Transputer-Picoputer
         t4/s_scalbnf.c
         t4/w_remainder.c
         t4/w_sqrt.c 
+        t4/fparithmetic.c
         
-        t4mod/fparithmetic.c
         t4mod/p.c
         t4mod/server.c
         
@@ -57,6 +57,14 @@ add_executable(Transputer-Picoputer
 
 target_compile_definitions(Transputer-Picoputer  PRIVATE
     TRANSPUTER_PICOPUTER_PROJECT=1
+)
+
+target_compile_options(Transputer-Picoputer PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wshadow
+    -Wconversion
 )
 
 pico_set_program_name(Transputer-Picoputer "Transputer-Picoputer")
