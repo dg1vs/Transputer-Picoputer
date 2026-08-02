@@ -26,8 +26,16 @@
 #define BOOT_DEBUG_PEEK 1
 #define BOOT_DEBUG_WORD_BYTES 4u
 
+// States used while decoding the special bootstrap PEEK and POKE commands.
+typedef enum {
+  BOOT_DEBUG_IDLE = 0,
+  BOOT_DEBUG_RECEIVE_ADDRESS,
+  BOOT_DEBUG_RECEIVE_POKE_VALUE,
+  BOOT_DEBUG_SEND_PEEK_VALUE
+} boot_debug_state_t;
+
 // Descriptor for the SSD1306 OLED used to display basic Picoputer status information.
-static I2C_SLAVE_DESC oled0 = {
+static I2C_SLAVE_DESC status_display = {
     .i2c = TP3_OLED_I2C,
     .sda_pin = TP3_OLED_SDA_PIN,
     .scl_pin = TP3_OLED_SCL_PIN,
@@ -50,10 +58,8 @@ int exitonerror = false;
 int peeksize = 8;
 // Legacy T4 setting describing the configured memory-address width.
 int membits = 0;
-
 // Legacy T4 profiling counters; retained here because the emulator expects this global symbol.
 int profile[10];
-
 // Legacy T4 flag enabling collection of profiling information.
 int profiling = false;
 // Legacy T4 trace-control value used by the emulator's diagnostic output.
@@ -73,32 +79,21 @@ char *dbgtrigger = NULL;
 
 
 // Byte offset within emulated memory at which the next bootstrap byte will be stored.
-uint32_t boot_write_index = 0;
+static uint32_t bootstrap_write_offset = 0;
 // Number of bootstrap bytes still expected after the one-byte bootstrap length field.
-uint8_t boot_length_remaining = 0;
+static uint8_t bootstrap_bytes_remaining = 0;
 // Link currently used for bootstrap traffic; -1 means that no link has been selected yet.
-int8_t boot_link = -1;
-// Indicates that a normal bootstrap image is currently being received.
-bool booting = false;
+static int8_t bootstrap_link = -1;
 // Becomes true after the complete bootstrap image has been written to emulated memory.
-static bool boot_done = false;
-
-// States used while decoding the special bootstrap PEEK and POKE commands.
-typedef enum {
-  BOOT_DEBUG_IDLE = 0,
-  BOOT_DEBUG_RECEIVE_ADDRESS,
-  BOOT_DEBUG_RECEIVE_POKE_VALUE,
-  BOOT_DEBUG_SEND_PEEK_VALUE
-} boot_debug_state_t;
-
+static bool bootstrap_complete = false;
+// 32-bit value being received by POKE or returned by PEEK.
+static uint32_t boot_debug_word = 0;
 // Current state of the bootstrap PEEK/POKE transaction state machine.
 static boot_debug_state_t boot_debug_state = BOOT_DEBUG_IDLE;
 // Current debug-bootstrap command: POKE, PEEK, or -1 when no command is active.
 static int8_t boot_debug_command = -1;
 // Little-endian 32-bit address assembled from incoming bootstrap debug bytes.
 static uint32_t boot_debug_address = 0;
-// 32-bit value being received by POKE or returned by PEEK.
-static uint32_t boot_debug_value = 0;
 // Byte position, from 0 to 3, while assembling or transmitting a 32-bit debug word.
 static uint8_t  boot_debug_byte_index = 0;
 // PIO instance used by LinkOut; saved globally because the PEEK reply path also transmits data.
@@ -110,22 +105,23 @@ volatile bool transputer_reset_requested = false;
 
 extern void server_simkey(void);
 
-void link_in_boot_start_data(int i, int data);
-void link_in_boot_start_ack(int i);
-void link_in_booting_ack(int i);
-void link_in_booting_data(int i, int data);
+void link_in_bootstrap_start(int i, int data);
+void link_in_bootstrap_start_ack(int i);
+void link_in_bootstrap_ack(int i);
+void link_in_bootstrap_data(int i, int data);
 
-static void link_in_boot_debug_data(int i, int data);
-static void link_in_boot_debug_ack(int i);
-static void boot_debug_finish(void);
-static void boot_debug_send_reply_byte(void);
-static void prepare_boot_mode(void);
+
+static void link_in_debug_data(int i, int data);
+static void link_in_peek_ack(int i);
+static void reset_boot_debug_state(void);
+static void send_next_peek_reply_byte(void);
+static void reset_bootstrap_state(void);
 
 
 // GPIO interrupt callback for the external active-low Transputer notReset signal.
 // The interrupt handler only latches a reset request and deliberately avoids changing emulator or PIO state.
 // The main execution loop observes this flag and performs the complete reset sequence in normal context.
-static void transputer_reset_gpio_irq(uint gpio, uint32_t events) {
+static void transputer_NotReset_irq_handler(uint gpio, uint32_t events) {
   (void)events;
 
   if (gpio == TP3_RESET_PIN) {
@@ -160,27 +156,28 @@ static void initialize_t4_emulator(void) {
 }
 
 
+
 // Finishes the current bootstrap PEEK or POKE transaction and returns to normal bootstrap command decoding.
 // All accumulated debug-command state is cleared so that a following transaction starts from a known condition.
 // The normal bootstrap data and ACK callbacks are restored only after the current debug operation is complete.
-static void boot_debug_finish(void) {
+static void reset_boot_debug_state(void) {
   boot_debug_state = BOOT_DEBUG_IDLE;
   boot_debug_command = -1;
   boot_debug_address = 0;
-  boot_debug_value = 0;
+  boot_debug_word = 0;
   boot_debug_byte_index = 0;
-  boot_link = -1;
+  bootstrap_link = -1;
 
-  link_in_data_fp = link_in_boot_start_data;
-  link_in_ack_fp = link_in_boot_start_ack;
+  link_in_data_fp = link_in_bootstrap_start;
+  link_in_ack_fp = link_in_bootstrap_start_ack;
 }
 
 
 // Queues one byte of a 32-bit PEEK result for transmission through the INMOS LinkOut PIO state machine.
-// The byte is encoded as the nine payload bits expected by the LinkOut PIO program; framing is generated by PIO.
+// The byte is encoded as payload bits expected by the LinkOut PIO program; framing is generated by PIO.
 // PEEK replies are ACK-clocked, so this routine sends only the current byte and the ACK handler advances to the next.
-static void boot_debug_send_reply_byte(void) {
-    const uint8_t reply_byte = (uint8_t)((boot_debug_value >> (boot_debug_byte_index * 8u)) & 0xffu);
+static void send_next_peek_reply_byte(void) {
+    const uint8_t reply_byte = (uint8_t)((boot_debug_word >> (boot_debug_byte_index * 8u)) & 0xffu);
     const int encoded_packet = 1 | ((int)reply_byte << 1);
     picoputerlinkout_program_putc(link_out_pio, link_out_sm, encoded_packet);
 }
@@ -189,10 +186,10 @@ static void boot_debug_send_reply_byte(void) {
 // Receives the data bytes that follow a bootstrap PEEK or POKE command on the selected INMOS link.
 // Address and value words are reconstructed little-endian, matching the byte order used by a real transputer link.
 // The routine performs the requested memory access and controls the ACK sequence or starts the PEEK reply transfer.
-static void link_in_boot_debug_data(int i, int data) {
+static void link_in_debug_data(int i, int data) {
   uint32_t received_byte;
 
-  if (i != boot_link) {
+  if (i != bootstrap_link) {
     return;
   }
 
@@ -219,20 +216,20 @@ static void link_in_boot_debug_data(int i, int data) {
       
       // Read the complete word before acknowledging the final address byte. 
       // The ACK and the first reply byte are then queued in that order on LinkOut.
-      boot_debug_value = word_int(boot_debug_address);
+      boot_debug_word = word_int(boot_debug_address);
       boot_debug_state = BOOT_DEBUG_SEND_PEEK_VALUE;
       send_ack_to_link(i);
-      boot_debug_send_reply_byte();
+      send_next_peek_reply_byte();
     } else {
       // data < 2 guarantees that this should never be reached.
-      boot_debug_finish();
+      reset_boot_debug_state();
       send_ack_to_link(i);
     }
     return;
   }
   
   if (boot_debug_state == BOOT_DEBUG_RECEIVE_POKE_VALUE) {
-    boot_debug_value |= received_byte << (boot_debug_byte_index * 8u);
+    boot_debug_word |= received_byte << (boot_debug_byte_index * 8u);
     boot_debug_byte_index++;
 
     if (boot_debug_byte_index == BOOT_DEBUG_WORD_BYTES) {
@@ -240,8 +237,8 @@ static void link_in_boot_debug_data(int i, int data) {
        * Commit the value and restore the command decoder before the
        * final ACK. The host may send another debug command immediately.
        */
-      writeword_int(boot_debug_address, boot_debug_value);
-      boot_debug_finish();
+      writeword_int(boot_debug_address, boot_debug_word);
+      reset_boot_debug_state();
     }
 
     send_ack_to_link(i);
@@ -252,17 +249,17 @@ static void link_in_boot_debug_data(int i, int data) {
 // Handles acknowledgements received while a four-byte bootstrap PEEK result is being transmitted.
 // Each valid ACK advances the reply byte index and causes the next byte of the 32-bit value to be queued.
 // After the fourth byte has been acknowledged, the debug transaction is finished and normal boot decoding resumes.
-static void link_in_boot_debug_ack(int i) {
-  if ((i != boot_link) || (boot_debug_state != BOOT_DEBUG_SEND_PEEK_VALUE)) {
+static void link_in_peek_ack(int i) {
+  if ((i != bootstrap_link) || (boot_debug_state != BOOT_DEBUG_SEND_PEEK_VALUE)) {
     return;
   }
 
   boot_debug_byte_index++;
 
   if (boot_debug_byte_index < BOOT_DEBUG_WORD_BYTES) {
-    boot_debug_send_reply_byte();
+    send_next_peek_reply_byte();
   } else {
-    boot_debug_finish();
+    reset_boot_debug_state();
   }
 }
 
@@ -270,26 +267,25 @@ static void link_in_boot_debug_ack(int i) {
 // Stores one received bootstrap byte into the emulated Transputer memory at the current download position.
 // The workspace pointer and write index are advanced after every byte while the remaining bootstrap length is counted down.
 // When the final byte has been stored, boot_done is asserted so the top-level lifecycle can leave the bootstrap loop.
-void link_in_boot_load(int i, int data) {
-    (void)i;
-
+void store_bootstrap_byte(int data) {
+    
     hard_assert(data >= 0);
     hard_assert(data <= UINT8_MAX);
 
     // Another byte has been received, load into memory
-    writebyte_int(MemStart + boot_write_index, (uint8_t)data);
+    writebyte_int(MemStart + bootstrap_write_offset, (uint8_t)data);
 
     // Update
-    WPtr = MemStart + boot_write_index;
+    WPtr = MemStart + bootstrap_write_offset;
 
     // Point to next byte
-    boot_write_index++;
+    bootstrap_write_offset++;
 
     // One more byte done
-    boot_length_remaining--;
+    bootstrap_bytes_remaining--;
 
-    if (boot_length_remaining == 0) {
-        boot_done = true;
+    if (bootstrap_bytes_remaining == 0) {
+        bootstrap_complete = true;
     }
 }
 
@@ -297,24 +293,21 @@ void link_in_boot_load(int i, int data) {
 // Decodes the first byte received while the emulator is waiting for a bootstrap command or bootstrap image.
 // Values of two or more are treated as the bootstrap length; values zero and one select the POKE and PEEK commands.
 // Callback handlers are switched before the ACK is sent so the 20-Mbit/s host may immediately transmit the next packet.
-void link_in_boot_start_data(int i, int data) {
+void link_in_bootstrap_start(int i, int data) {
 
   // We have a length byte on a link, start loading data into memory
-  boot_link = i;
+  bootstrap_link = (int8_t)i;
 
   printf("Boot start data (length):%02X\n", data);
 
   if (data >= 2) {
     hard_assert(data >= 0);
     hard_assert(data <= UINT8_MAX);
-    boot_length_remaining = data;
-
-    // Switch to the memory loader handler from now on
-    booting = true;
+    bootstrap_bytes_remaining = (uint8_t)data;
 
     // printf("Booting, moving to download handlers...\n");
-    link_in_data_fp = link_in_booting_data;
-    link_in_ack_fp = link_in_booting_ack;
+    link_in_data_fp = link_in_bootstrap_data;
+    link_in_ack_fp = link_in_bootstrap_ack;
 
     // ACK the byte
     send_ack_to_link(i);
@@ -326,15 +319,15 @@ void link_in_boot_start_data(int i, int data) {
     // Standard transputer debug bootstrap commands:
     // 0: POKE, followed by address word and value word
     // 1: PEEK, followed by address word; return one value word
-    boot_debug_command = data;
+    boot_debug_command = (int8_t)data;
     boot_debug_state = BOOT_DEBUG_RECEIVE_ADDRESS;
     boot_debug_address = 0;
-    boot_debug_value = 0;
+    boot_debug_word = 0;
     boot_debug_byte_index = 0;
 
     // Install the transaction handlers before ACKing the command byte.
-    link_in_data_fp = link_in_boot_debug_data;
-    link_in_ack_fp = link_in_boot_debug_ack;
+    link_in_data_fp = link_in_debug_data;
+    link_in_ack_fp = link_in_peek_ack;
     send_ack_to_link(i);
   }
 }
@@ -343,7 +336,7 @@ void link_in_boot_start_data(int i, int data) {
 // Handles an ACK received while the bootstrap decoder is still waiting for its first data byte.
 // Such an ACK does not belong to a valid transaction in this state, so it is intentionally ignored.
 // The link-number parameter is retained because this function must match the common ACK callback interface.
-void link_in_boot_start_ack(int i) {
+void link_in_bootstrap_start_ack(int i) {
   (void)i;
   // This shouldn't happen, just ignore it
 }
@@ -351,12 +344,12 @@ void link_in_boot_start_ack(int i) {
 
 // Processes data bytes while a normal bootstrap image is actively being downloaded into emulated memory.
 // Only traffic from the link that supplied the bootstrap length byte is accepted; data from other links is ignored.
-// Each accepted byte is stored through link_in_boot_load() and then acknowledged back to the transmitting link.
-void link_in_booting_data(int i, int data) {
-  // We only deal with the link that we ar ebooting from
-  if (i == boot_link) {
+// Each accepted byte is stored through store_bootstrap_byte() and then acknowledged back to the transmitting link.
+void link_in_bootstrap_data(int i, int data) {
+  // We only deal with the link that we are booting from
+  if (i == bootstrap_link) {
     // Store byte in memory
-    link_in_boot_load(i, data);
+    store_bootstrap_byte(data);
 
     // ACK the byte
     send_ack_to_link(i);
@@ -369,7 +362,7 @@ void link_in_booting_data(int i, int data) {
 // Provides the ACK callback required while the emulator is receiving a normal bootstrap image.
 // Incoming ACK packets are not meaningful for this receive-only phase, so no bootstrap state is changed here.
 // The link-number parameter is intentionally unused but retained to satisfy the shared ACK callback signature.
-void link_in_booting_ack(int i) {
+void link_in_bootstrap_ack(int i) {
   (void)i;
 }
 
@@ -430,14 +423,13 @@ static void service_transputer_reset(PIO pio, uint linkout_sm, uint linkout_offs
 // Restores the software bookkeeping needed to accept a fresh bootstrap after startup or an external reset.
 // Bootstrap counters, link selection, and completion flags are returned to their idle values before reception begins.
 // Processor registers, server transfer state, and PIO FIFOs are intentionally handled by their dedicated reset routines.
-static void prepare_boot_mode(void) {
-  boot_write_index = 0;
-  boot_length_remaining = 0;
-  boot_link = -1;
-  booting = false;
-  boot_done = false;
+static void reset_bootstrap_state(void) {
+  bootstrap_write_offset = 0;
+  bootstrap_bytes_remaining = 0;
+  bootstrap_link = -1;
+  bootstrap_complete = false;
 
-  boot_debug_finish();
+  reset_boot_debug_state();
 }
 
 
@@ -458,13 +450,13 @@ int main(void) {
 
   printf("\nPicoputer\n");
 
-  oled_setup(&oled0);
-  oled_set_xy(&oled0, 0, 0);
-  oled_display_string(&oled0, "Picoputer");
-  oled_set_xy(&oled0, 0, 14);
-  oled_display_string(&oled0, "I2C OLED Display");
-  oled_set_xy(&oled0, 0, 28);
-  oled_display_string(&oled0, "0003");
+  oled_setup(&status_display);
+  oled_set_xy(&status_display, 0, 0);
+  oled_display_string(&status_display, "Picoputer");
+  oled_set_xy(&status_display, 0, 14);
+  oled_display_string(&status_display, "I2C OLED Display");
+  oled_set_xy(&status_display, 0, 28);
+  oled_display_string(&status_display, "0006");
 
   const uint32_t system_clock_hz = clock_get_hz(clk_sys);
   printf("clk_sys: %lu Hz\n", (unsigned long)system_clock_hz);
@@ -486,7 +478,7 @@ int main(void) {
   gpio_pull_up(TP3_RESET_PIN);
 
   // setup irq for notReset
-  gpio_set_irq_enabled_with_callback(TP3_RESET_PIN, GPIO_IRQ_EDGE_FALL, true, transputer_reset_gpio_irq);
+  gpio_set_irq_enabled_with_callback(TP3_RESET_PIN, GPIO_IRQ_EDGE_FALL, true, transputer_NotReset_irq_handler);
 
   // edge case -- handle the case where Reset was already low when the interrupt was enabled
   printf("Reset input initial level: %u\n", (unsigned)gpio_get(TP3_RESET_PIN));
@@ -564,12 +556,12 @@ int main(void) {
   // reset request so reset can interrupt either state.
   
   while (true) {
-    prepare_boot_mode();
+    reset_bootstrap_state();
 
     printf("BOOT\n");
     
     // Wait for a bootstrap, but remain responsive to external Reset.
-    while (!boot_done && !transputer_reset_requested) {
+    while (!bootstrap_complete && !transputer_reset_requested) {
       bootloop();
     }
 
@@ -581,7 +573,8 @@ int main(void) {
     }
 
     
-    printf("RUN:%02" PRIX32 "\n", boot_write_index);
+    printf("RUN:%02" PRIX32 "\n", bootstrap_write_offset);
+    
     // mainloop() normally remains here while the program runs.
     // It returns when the Reset flag is detected, or for an existing
     // emulator exit condition.
