@@ -1,10 +1,10 @@
 # Transputer Picoputer
 
 This project is a port of 
-[blackjetrock's Picoputer](https://github.com/blackjetrock/picoputer), which itself is based on Julian Highfield's T4 Transputer emulator, available from the 
-[pahihu/t4 repository](https://github.com/pahihu/t4).
+[blackjetrock's Picoputer](https://github.com/blackjetrock/picoputer), which itself is based on a Transputer emulator, available from 
+the [pahihu/t4 repository](https://github.com/pahihu/t4). The work of pahihu is based on a port of Julian Highfield's T4 Transputer emulator.
 
-Julian's T4 emulator is an impressive piece of software. It emulates a Transputer and can run programs compiled with the original INMOS toolset.
+The Transputer emulator is an impressive piece of software. It emulates a Transputer and can run programs compiled with the original INMOS toolset.
 
 This port runs the emulator on a Raspberry Pi Pico 2. One of the emulated Transputer links is connected to the Pico's PIO hardware. The PIO state machines implement the Transputer link protocol at a link speed of 20 Mbit/s.
 
@@ -29,8 +29,12 @@ The project is also intended as a learning platform for:
 
 A similar project is the [DevZendo Transputer Emulator](https://github.com/devzendo/transputer-emulator/tree/master), which also uses a Raspberry Pi Pico to emulate a Transputer.
 
-For this project, however, I decided to continue using Julian Highfield's emulator. One important reason is its close relationship with the Transputer validation suite created by Mike Brüstle and available through [transputer.net](https://www.transputer.net/).
+For this project, however, I decided to continue using [pahihu/t4 repository](https://github.com/pahihu/t4). One important reason is its close relationship with the Transputer validation suite created by Mike Brüstle and available through [transputer.net](https://www.transputer.net/).
 
 ## Next steps
-
-
+- adding NotError
+- Analyse
+- More useful debug Output
+- Testing TVS
+- Attaching hardware
+- Building an TRAM with a Pico2 running this software
