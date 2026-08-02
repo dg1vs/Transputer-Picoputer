@@ -448,6 +448,30 @@ static void reset_bootstrap_state(void) {
 }
 
 
+// Reflect the emulated Transputer ErrorFlag on the TRAM notError signal
+// and on the Pico status LED.
+// TRAM notError is active low and open collector:
+//   error_active == true  -> drive notError low
+//   error_active == false -> release notError
+//
+// The Pico LED is active high and therefore lights while ErrorFlag is set.
+void picoputer_error_state_changed(bool error_active)
+{
+    if (error_active) {
+        // Assert TRAM notError.
+        gpio_put(TP3_NOT_ERROR_PIN, 0);
+        gpio_set_dir(TP3_NOT_ERROR_PIN, GPIO_OUT);
+
+        gpio_put(TP3_LED_PIN, 1);
+    } else {
+        // Release the open-drain/open-collector notError output.
+        gpio_set_dir(TP3_NOT_ERROR_PIN, GPIO_IN);
+
+        gpio_put(TP3_LED_PIN, 0);
+    }
+}
+
+
 // Configures the Pico hardware, PIO link engines, user interface, and T4 emulator before entering the runtime lifecycle.
 // The main lifecycle alternates between waiting for a bootstrap image, executing the emulated Transputer, and servicing reset.
 // External notReset requests can interrupt both BOOT and RUN states so repeated iserver sessions do not require a Pico reboot.
@@ -471,7 +495,7 @@ int main(void) {
   oled_set_xy(&status_display, 0, 14);
   oled_display_string(&status_display, "I2C OLED Display");
   oled_set_xy(&status_display, 0, 28);
-  oled_display_string(&status_display, "0008");
+  oled_display_string(&status_display, "0010");
 
   const uint32_t system_clock_hz = clock_get_hz(clk_sys);
   printf("clk_sys: %lu Hz\n", (unsigned long)system_clock_hz);
@@ -481,6 +505,13 @@ int main(void) {
   gpio_init(TP3_LED_PIN);
   gpio_set_dir(TP3_LED_PIN, GPIO_OUT);
   gpio_put(TP3_LED_PIN, 0);
+
+  // TRAM notError is an active-low open-collector signal.
+  // Keep the output latch low permanently. The signal is asserted by switching
+  // the GPIO to output mode and released by switching it back to input mode.
+  gpio_init(TP3_NOT_ERROR_PIN);
+  gpio_put(TP3_NOT_ERROR_PIN, 0);
+  gpio_set_dir(TP3_NOT_ERROR_PIN, GPIO_IN);
 
   // INMOS links are inactive at logic low. Hold LinkOut low immediately. 
   gpio_init(TP3_LINK_OUT_PIN);

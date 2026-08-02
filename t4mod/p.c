@@ -55,6 +55,7 @@
 
 // Todo add DEFINE
 #include "pico_transputer_config.h"
+#include "picoputer_signals.h"
 
 #if TRANS_USE_SPI_RAM
 #include "spi_ram.h"
@@ -182,8 +183,28 @@ uint32_t IntEnabled; /* Interrupt enabled */
 #define ClearGotoSNP STATUSReg &= ~GotoSNPBit
 #define ReadGotoSNP (STATUSReg & GotoSNPBit)
 
-#define SetError STATUSReg |= ErrorFlag
-#define ClearError STATUSReg &= ~ErrorFlag
+//Calling the GPIO function every time SetError executes isn't harmful, but we can avoid redundant writes.
+static void set_error(void)
+{
+    if ((STATUSReg & ErrorFlag) == 0u) {
+        STATUSReg |= ErrorFlag;
+        picoputer_error_state_changed(true);
+    }
+}
+
+static void clear_error(void)
+{
+    if ((STATUSReg & ErrorFlag) != 0u) {
+        STATUSReg &= ~ErrorFlag;
+        picoputer_error_state_changed(false);
+    }
+}
+
+#define SetError   set_error()
+#define ClearError clear_error()
+
+//#define SetError STATUSReg |= ErrorFlag
+//#define ClearError STATUSReg &= ~ErrorFlag
 #define ReadError (STATUSReg & ErrorFlag)
 
 #define SetHaltOnError STATUSReg |= HaltOnErrorFlag
