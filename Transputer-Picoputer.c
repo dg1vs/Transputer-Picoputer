@@ -102,6 +102,8 @@ static PIO link_out_pio;
 static uint link_out_sm;
 // Latched request from the active-low external notReset signal; serviced outside interrupt context.
 volatile bool transputer_reset_requested = false;
+// Latched request from the active-low external notAnalyse; just a plaseholder.
+volatile bool transputer_analyse_requested = false;
 
 extern void server_simkey(void);
 
@@ -118,16 +120,29 @@ static void send_next_peek_reply_byte(void);
 static void reset_bootstrap_state(void);
 
 
-// GPIO interrupt callback for the external active-low Transputer notReset signal.
-// The interrupt handler only latches a reset request and deliberately avoids changing emulator or PIO state.
-// The main execution loop observes this flag and performs the complete reset sequence in normal context.
-static void transputer_NotReset_irq_handler(uint gpio, uint32_t events) {
+// GPIO interrupt callback for external Transputer control signals.
+// The Pico SDK does not install an independent callback per GPIO with this function. 
+// There is only one default GPIO IRQ callback per core. 
+// gpio_set_irq_enabled_with_callback() enables the specified GPIO and 
+// also replaces the callback for the whole core. 
+// Raspberry Pi documents this explicitly: all GPIOs using this mechanism on one core share a single callback.
+//
+// --> notReset and notAnalyse must share this handler. The interrupt handler only latches requests; 
+// emulator state changes are performed outside interrupt context.
+static void transputer_control_gpio_irq_handler(uint gpio, uint32_t events) {
   (void)events;
 
   if (gpio == TP3_RESET_PIN) {
     transputer_reset_requested = true;
+    return;
+  }
+
+  if (gpio == TP3_NOT_ANALYSE_PIN) {
+    transputer_analyse_requested = true;
+        printf("Something really gone wrong\n");
   }
 }
+
 
 
 // Initializes the T4 emulator configuration that depends on the Pico hardware and project settings.
@@ -456,7 +471,7 @@ int main(void) {
   oled_set_xy(&status_display, 0, 14);
   oled_display_string(&status_display, "I2C OLED Display");
   oled_set_xy(&status_display, 0, 28);
-  oled_display_string(&status_display, "0006");
+  oled_display_string(&status_display, "0008");
 
   const uint32_t system_clock_hz = clock_get_hz(clk_sys);
   printf("clk_sys: %lu Hz\n", (unsigned long)system_clock_hz);
@@ -478,7 +493,7 @@ int main(void) {
   gpio_pull_up(TP3_RESET_PIN);
 
   // setup irq for notReset
-  gpio_set_irq_enabled_with_callback(TP3_RESET_PIN, GPIO_IRQ_EDGE_FALL, true, transputer_NotReset_irq_handler);
+  gpio_set_irq_enabled_with_callback(TP3_RESET_PIN, GPIO_IRQ_EDGE_FALL, true, transputer_control_gpio_irq_handler);
 
   // edge case -- handle the case where Reset was already low when the interrupt was enabled
   printf("Reset input initial level: %u\n", (unsigned)gpio_get(TP3_RESET_PIN));
@@ -487,6 +502,18 @@ int main(void) {
     printf("Reset active at startup\n");
     transputer_reset_requested = true;
   }
+
+  // The simulator exposes a TRAM notAnalse
+  gpio_init(TP3_NOT_ANALYSE_PIN);
+  gpio_set_dir(TP3_NOT_ANALYSE_PIN, GPIO_IN);
+  gpio_pull_up(TP3_NOT_ANALYSE_PIN);
+
+  // setup irq for notReset
+  gpio_set_irq_enabled_with_callback(TP3_NOT_ANALYSE_PIN, GPIO_IRQ_EDGE_FALL, true, transputer_control_gpio_irq_handler);
+
+  // edge case -- handle the case where Analyse was already low when the interrupt was enabled
+  printf("Analyse input initial level: %u\n", (unsigned)gpio_get(TP3_NOT_ANALYSE_PIN));
+  // Todo the same hadling as for reset?
 
   // Initialise the link server
   server_init();

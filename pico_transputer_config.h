@@ -36,7 +36,9 @@
 // Transputer LinkIn      GP16    21
 // Transputer LinkOut     GP17    22
 // Transputer LinkClock   GP18    24    5 MHz
-// Transputer Reset       GP19    25    active high
+// Transputer NotReset    GP19    25    
+// Transputer NotAnalyze  GP20    26    
+// Transputer NotError    GP21    27    
 // ...
 // On-board LED           GP25    internal
 
@@ -66,6 +68,8 @@
 // is notReset: GP19 low asserts reset and GP19 high releases it.
 // TODO Change to Notreset???
 #define TP3_RESET_PIN            19u
+#define TP3_NOT_ANALYSE_PIN      20u
+#define TP3_NOT_ERROR_PIN        21u
 
 // Optional external SPI RAM on SPI1. 
 #define TP3_SPI_RAM_SPI          spi1
@@ -89,12 +93,14 @@
      TP3_GPIO_BIT(TP3_LINK_OUT_PIN) |                                       \
      TP3_GPIO_BIT(TP3_LINK_CLOCK_PIN) |                                     \
      TP3_GPIO_BIT(TP3_RESET_PIN) |                                          \
+     TP3_GPIO_BIT(TP3_NOT_ANALYSE_PIN) |                                    \
+     TP3_GPIO_BIT(TP3_NOT_ERROR_PIN) |                                      \
      TP3_GPIO_BIT(TP3_SPI_RAM_RX_PIN) |                                     \
      TP3_GPIO_BIT(TP3_SPI_RAM_CSN_PIN) |                                    \
      TP3_GPIO_BIT(TP3_SPI_RAM_SCK_PIN) |                                    \
      TP3_GPIO_BIT(TP3_SPI_RAM_TX_PIN))
 
-_Static_assert(__builtin_popcountll(TP3_USED_GPIO_MASK) == 13,
+_Static_assert(__builtin_popcountll(TP3_USED_GPIO_MASK) == 15,
                "pico2_pin_config.h assigns one GPIO to multiple functions");
 
 // 
