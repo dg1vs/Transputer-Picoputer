@@ -1327,17 +1327,20 @@ void mainloop(void) {
             }
           }
         } else {
-          /*
-           * External LinkOut communication.
-           *
-           * The active Pico runtime link service uses LinkOut[].  The old
-           * Link[0].Out bookkeeping is not consumed by linkloop(), which left
-           * OUTBYTE processes permanently descheduled.  Store the byte in the
-           * workspace and submit it through the same ACK-gated path as OUT.
-           */
+          // Pico link integration:
+          // OUTBYTE and OUTWORD must use the Pico LinkOut transfer mechanism rather
+          // than only updating the original T4 Link[].Out state.
+          //
+          // This became visible while debugging rspy: the rspy bootworm executes
+          // OUTBYTE to return the processor identification value (0xFC). The
+          // bootstrap completed successfully, but the reply was not transmitted when
+          // the instruction only updated the legacy T4 link state.
+          //
+          // send_value_linkout_message() stores the value in the workspace and arms
+          // LinkOut[].source/length. linkloop() then performs the physical,
+          // ACK-controlled transfer through the Pico PIO LinkOut state machine. 
           deschedule();
-          send_value_linkout_message(
-              1, AReg, BReg, CReg, WPtr, IPtr, ProcPriority);
+          send_value_linkout_message(1, AReg, BReg, CReg, WPtr, IPtr, ProcPriority);
         }
         break;
       case 0x0f: /* outword     */
