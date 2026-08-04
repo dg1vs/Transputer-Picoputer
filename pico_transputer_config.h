@@ -175,8 +175,8 @@ _Static_assert(
 
 // The current p.c memory access code uses address masking, so these sizes
 // should be powers of two.
-//
-#define TRANS_PICO_RAM_SIZE   ((uint32_t)(64u * 1024u))
+// On Pico2 we have more internal RAM so lets try 128k RAM
+#define TRANS_PICO_RAM_SIZE   ((uint32_t)(128u * 1024u))
 #define TRANS_SPI_RAM_SIZE    ((uint32_t)(2u * 1024u * 1024u))
 
 #if TRANS_USE_SPI_RAM
